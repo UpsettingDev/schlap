@@ -12,6 +12,13 @@ type Checkin = {
   members: { handle: string; display_name: string; is_agent: boolean } | null;
 };
 
+const FIELDS = [
+  { key: 'done', label: '✅ What did you get done?', placeholder: 'Shipped, fixed, completed...' },
+  { key: 'in_progress', label: '🔄 What are you working on?', placeholder: 'Currently in progress...' },
+  { key: 'blockers', label: '🚧 Any blockers?', placeholder: "What's in your way? (or leave blank)" },
+  { key: 'notes', label: '📝 Notes for the team', placeholder: 'Anything else the room should know...' },
+] as const;
+
 export default function CheckinPage() {
   const [checkins, setCheckins] = useState<Checkin[]>([]);
   const [form, setForm] = useState({ done: '', in_progress: '', blockers: '', notes: '' });
@@ -21,11 +28,10 @@ export default function CheckinPage() {
     fetch('/api/checkin').then((r) => r.json()).then((d) => setCheckins(d.checkins ?? []));
   }, []);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function postCheckin() {
     await fetch('/api/checkin', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.NEXT_PUBLIC_AGENT_API_KEY ?? ''}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
     });
     setSubmitted(true);
@@ -52,17 +58,12 @@ export default function CheckinPage() {
         <p className="text-sm text-zinc-500 mb-8">{today}</p>
 
         {!submitted ? (
-          <form onSubmit={submit} className="space-y-5 mb-12">
-            {[
-              { key: 'done', label: '✅ What did you get done?', placeholder: 'Shipped, fixed, completed...' },
-              { key: 'in_progress', label: '🔄 What are you working on?', placeholder: 'Currently in progress...' },
-              { key: 'blockers', label: '🚧 Any blockers?', placeholder: 'What\'s in your way? (or leave blank)' },
-              { key: 'notes', label: '📝 Notes for the team', placeholder: 'Anything else the room should know...' },
-            ].map(({ key, label, placeholder }) => (
+          <div className="space-y-5 mb-12">
+            {FIELDS.map(({ key, label, placeholder }) => (
               <div key={key}>
                 <label className="block text-sm font-medium text-zinc-300 mb-1.5">{label}</label>
                 <textarea
-                  value={form[key as keyof typeof form]}
+                  value={form[key]}
                   onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                   placeholder={placeholder}
                   rows={2}
@@ -70,17 +71,21 @@ export default function CheckinPage() {
                 />
               </div>
             ))}
-            <button type="submit" className="bg-white text-zinc-950 text-sm font-semibold px-6 py-2.5 rounded-lg hover:bg-zinc-200 transition-colors">
+            <button
+              type="button"
+              onClick={postCheckin}
+              className="bg-white text-zinc-950 text-sm font-semibold px-6 py-2.5 rounded-lg hover:bg-zinc-200 transition-colors"
+            >
               Post Check-in
             </button>
-          </form>
+          </div>
         ) : (
           <div className="mb-12 p-4 bg-zinc-800 rounded-lg text-sm text-zinc-300">
             ✅ Check-in posted to #agent-standup.
           </div>
         )}
 
-        <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4">Today's Check-ins</h2>
+        <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4">Today&apos;s Check-ins</h2>
         {checkins.length === 0 && <p className="text-sm text-zinc-600">No check-ins yet today.</p>}
         <div className="space-y-4">
           {checkins.map((c) => (

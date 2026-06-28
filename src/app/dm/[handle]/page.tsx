@@ -2,30 +2,30 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { createClient } from '@/lib/supabase-browser';
 import Link from 'next/link';
 
-type Message = {
+type DM = {
   id: string;
   body: string;
   created_at: string;
-  members: { handle: string; display_name: string; is_agent: boolean } | null;
+  from_id: string;
+  sender: { handle: string; display_name: string; is_agent: boolean } | null;
 };
 
 type Member = { handle: string; display_name: string; is_agent: boolean };
 
 const CHANNELS = ['general', 'agent-standup', 'infra', 'builds', 'design', 'ideas'];
 
-export default function ChannelPage() {
-  const params = useParams<{ id: string }>();
-  const slug = params.id;
-  const [messages, setMessages] = useState<Message[]>([]);
+export default function DMPage() {
+  const params = useParams<{ handle: string }>();
+  const handle = params.handle;
+
+  const [messages, setMessages] = useState<DM[]>([]);
   const [body, setBody] = useState('');
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState<Member | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const supabase = createClient();
 
   useEffect(() => {
     fetch('/api/me').then((r) => r.json()).then((d) => setMe(d.member));
@@ -34,41 +34,46 @@ export default function ChannelPage() {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/messages?channel=${slug}&limit=100`)
+    fetch(`/api/dm?with=${handle}`)
       .then((r) => r.json())
       .then((d) => { setMessages(d.messages ?? []); setLoading(false); });
-  }, [slug]);
+  }, [handle]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Poll for new DMs every 5s (realtime for DMs needs IDs; polling is fine for v1)
   useEffect(() => {
-    const channel = supabase
-      .channel(`messages:${slug}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-        setMessages((prev) => [...prev, payload.new as Message]);
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug]);
+    const interval = setInterval(() => {
+      fetch(`/api/dm?with=${handle}`)
+        .then((r) => r.json())
+        .then((d) => setMessages(d.messages ?? []));
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [handle]);
 
   async function send() {
     if (!body.trim()) return;
     const draft = body;
     setBody('');
-    await fetch('/api/messages', {
+    const res = await fetch('/api/dm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel_slug: slug, body: draft }),
+      body: JSON.stringify({ to_handle: handle, body: draft }),
     });
+    if (res.ok) {
+      const d = await fetch(`/api/dm?with=${handle}`).then((r) => r.json());
+      setMessages(d.messages ?? []);
+    }
   }
 
   async function signOut() {
     await fetch('/api/auth/signout', { method: 'POST' });
     window.location.href = '/login';
   }
+
+  const otherMember = members.find((m) => m.handle === handle);
 
   return (
     <div className="flex h-full">
@@ -85,7 +90,7 @@ export default function ChannelPage() {
             <Link
               key={c}
               href={`/channel/${c}`}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors ${c === slug ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'}`}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
             >
               # {c}
             </Link>
@@ -100,7 +105,7 @@ export default function ChannelPage() {
                   <Link
                     key={m.handle}
                     href={`/dm/${m.handle}`}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors ${m.handle === handle ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'}`}
                   >
                     <span className="text-xs">{m.is_agent ? '🤖' : '○'}</span>
                     {m.display_name}
@@ -123,29 +128,39 @@ export default function ChannelPage() {
         </div>
       </aside>
 
-      {/* Channel */}
+      {/* DM thread */}
       <div className="flex-1 flex flex-col">
         <header className="px-6 py-4 border-b border-zinc-800 bg-zinc-900">
-          <h2 className="font-semibold text-white"># {slug}</h2>
+          <h2 className="font-semibold text-white">
+            {otherMember?.is_agent ? '🤖 ' : ''}{otherMember?.display_name ?? handle}
+          </h2>
+          <p className="text-xs text-zinc-500 mt-0.5">@{handle}</p>
         </header>
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
           {loading && <p className="text-zinc-500 text-sm">Loading…</p>}
-          {messages.map((m) => (
-            <div key={m.id} className="flex gap-3">
-              <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
-                {m.members?.is_agent ? '🤖' : (m.members?.handle?.[0]?.toUpperCase() ?? '?')}
-              </div>
-              <div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-sm font-semibold text-zinc-200">{m.members?.display_name ?? 'Unknown'}</span>
-                  <span className="text-xs text-zinc-500">{new Date(m.created_at).toLocaleTimeString()}</span>
-                  {m.members?.is_agent && <span className="text-xs bg-zinc-700 text-zinc-400 px-1.5 py-0.5 rounded">agent</span>}
+          {!loading && messages.length === 0 && (
+            <p className="text-zinc-600 text-sm">No messages yet. Say hi!</p>
+          )}
+          {messages.map((m) => {
+            const isMe = m.sender?.handle === me?.handle;
+            return (
+              <div key={m.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}>
+                <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                  {m.sender?.is_agent ? '🤖' : (m.sender?.handle?.[0]?.toUpperCase() ?? '?')}
                 </div>
-                <p className="text-sm text-zinc-300 whitespace-pre-wrap mt-0.5">{m.body}</p>
+                <div className={`max-w-md ${isMe ? 'items-end' : 'items-start'} flex flex-col`}>
+                  <div className={`flex items-baseline gap-2 ${isMe ? 'flex-row-reverse' : ''}`}>
+                    <span className="text-sm font-semibold text-zinc-200">{m.sender?.display_name ?? 'Unknown'}</span>
+                    <span className="text-xs text-zinc-500">{new Date(m.created_at).toLocaleTimeString()}</span>
+                  </div>
+                  <p className={`text-sm whitespace-pre-wrap mt-0.5 px-3 py-2 rounded-lg ${isMe ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-800 text-zinc-300'}`}>
+                    {m.body}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={bottomRef} />
         </div>
 
@@ -155,7 +170,7 @@ export default function ChannelPage() {
               value={body}
               onChange={(e) => setBody(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-              placeholder={`Message #${slug}`}
+              placeholder={`Message ${otherMember?.display_name ?? handle}`}
               className="flex-1 bg-zinc-800 text-zinc-100 placeholder-zinc-500 rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-zinc-600"
             />
             <button type="button" onClick={send} className="bg-zinc-700 hover:bg-zinc-600 text-white text-sm px-4 py-2.5 rounded-lg transition-colors">

@@ -11,6 +11,7 @@ create table members (
   avatar_url text,
   is_agent boolean default false,      -- true for AI agents
   api_key text unique,                 -- agents post via API key
+  auth_user_id uuid unique,            -- links to auth.users.id for human members
   created_at timestamptz default now()
 );
 

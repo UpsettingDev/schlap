@@ -1,9 +1,28 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// Defer createClient until first property access so this module evaluates
+// cleanly at build time when env vars are not yet injected.
+function lazy(getter: () => SupabaseClient): SupabaseClient {
+  let instance: SupabaseClient | null = null;
+  return new Proxy({} as SupabaseClient, {
+    get(_, prop) {
+      if (!instance) instance = getter();
+      const value = (instance as unknown as Record<string | symbol, unknown>)[prop];
+      return typeof value === 'function' ? (value as Function).bind(instance) : value;
+    },
+  });
+}
 
-export const supabase = createClient(url, anonKey);
+export const supabase = lazy(() =>
+  createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+);
 
-export const serviceClient = createClient(url, serviceKey);
+export const serviceClient = lazy(() =>
+  createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+);
